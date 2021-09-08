@@ -1,0 +1,227 @@
+# Writen in Google Colab
+from google.colab import drive
+drive.mount('/content/google-drive')
+
+
+
+# Importing Stuff
+import pandas as pd
+import numpy as np
+from tensorflow import keras
+from tensorflow.keras.layers import Dense
+from keras.layers import LSTM
+from sklearn.metrics import mean_absolute_error
+from tensorflow.keras.preprocessing.sequence import TimeseriesGenerator
+import matplotlib.pyplot as plt
+from keras.callbacks import ModelCheckpoint
+from numpy.testing import assert_allclose
+from keras.models import  load_model
+import os
+
+
+# Data prepping
+!cp /content/google-drive/'My Drive'/kaggle/winton/*.csv .
+!cp /content/google-drive/'My Drive'/kaggle/winton/*.pb .
+train = pd.read_csv('train.csv')
+for i in train:
+    train[i].fillna(20*train[i].max(),inplace=True)
+    
+intraday_rets = []
+intraday_target = []
+n_samples_treino = 30000
+n_samples_valid = len(train)-n_samples_treino
+features = ['Feature_1', 'Feature_2', 'Feature_3', 'Feature_4', 'Feature_5', 'Feature_6',
+            'Feature_7', 'Feature_8', 'Feature_9', 'Feature_10', 'Feature_11', 'Feature_12',
+            'Feature_13', 'Feature_14', 'Feature_15', 'Feature_16', 'Feature_17', 'Feature_18',
+            'Feature_19', 'Feature_20', 'Feature_21', 'Feature_22', 'Feature_23', 'Feature_24',
+            'Feature_25']
+n_features = len(features)
+feat_train = train[features][:n_samples_treino]
+feat_val = train[features][n_samples_treino:]
+#fazer append dos nomes dos retornos
+for i in range(2, 181):
+       intraday_rets.append(f'Ret_{i}')
+train_lstm_X = np.array(train[intraday_rets][:n_samples_treino])
+val_lstm_X = np.array(train[intraday_rets][n_samples_treino:])
+
+
+# Intraday Data prepping
+len_window = 119
+aux_treino=[list(TimeseriesGenerator(train_lstm_X[i],train_lstm_X[i],length=119)) for i in range(n_samples_treino)]
+aux_val = [list(TimeseriesGenerator(val_lstm_X[i],val_lstm_X[i],length=119)) for i in range(n_samples_valid)]
+
+treino = [aux_treino[i][0][0] for i in range(n_samples_treino)]
+treino = np.concatenate(treino, axis=0)
+targs = [aux_treino[i][0][1] for i in range(n_samples_treino)]
+targs = np.concatenate(targs, axis=0)
+
+treino_val = [aux_val[i][0][0] for i in range(n_samples_valid)]
+treino_val = np.concatenate(treino_val, axis=0)
+
+targs_val = [aux_val[i][0][1] for i in range(n_samples_valid)]
+targs_val = np.concatenate(targs_val, axis=0)
+
+X_treino = np.array(treino)
+X_treino = np.reshape(X_treino, (X_treino.shape[0], X_treino.shape[1], 1))
+y_treino = np.array(targs)
+y_treino = np.reshape(y_treino,(y_treino.shape[0],1))
+X_valid= np.array(treino_val)
+X_valid = np.reshape(X_valid, (X_valid.shape[0], X_valid.shape[1], 1))
+y_valid = np.array(targs_val)
+feat_treino = np.array(feat_train)
+feat_valid = np.array(feat_val)
+
+a = feat_treino
+a = np.repeat(a,int(len(X_treino)/n_samples_treino),axis=0)
+a = np.reshape(a,(-1,n_features))
+b = feat_valid
+b = np.repeat(b,int(len(X_valid)/n_samples_valid),axis=0)
+b = np.reshape(b,(-1,n_features))
+
+
+
+# Intraday model building
+units=60
+n_epochs = 10
+n_batch = 30
+inputs_fnn = keras.layers.Input(shape = (n_features,))
+x = keras.layers.Dense(units, activation="relu")(inputs_fnn)
+x1 = keras.layers.Dense(units, activation = 'sigmoid')(x)
+x2 = keras.layers.Dense(units, activation = 'sigmoid')(x)
+input_x = [x1,x2] 
+
+inputs_lstm = keras.layers.Input(shape=(X_treino.shape[1],1))
+y = keras.layers.LSTM(units, return_sequences = True)(inputs_lstm,initial_state=input_x)
+y = keras.layers.LSTM(units, return_sequences = True)(y)
+y = keras.layers.LSTM(units, return_sequences = False)(y)
+
+hid1 = keras.layers.Dense(units)(y)
+out = keras.layers.Dense(1)(hid1)
+model = keras.Model(inputs=[inputs_fnn,inputs_lstm], outputs=out)
+model.compile(optimizer='adam',
+              loss='mse',
+              metrics=['mae'])
+keras.utils.plot_model(model, "my_first_model_with_shape_info.png", show_shapes=True)
+
+checkpoint_path = "training_1/cp.ckpt"
+checkpoint_dir = os.path.dirname(checkpoint_path)
+cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+                                                 save_weights_only=True,
+                                                 verbose=1)
+model.fit(x=[a,X_treino],y=y_treino, epochs=n_epochs, batch_size=n_batch, callbacks=[cp_callback])
+test_scores = model.evaluate(x=[b,X_valid],y=y_valid, verbose=2)
+print("Test loss:", test_scores[0])
+print("Test accuracy:", test_scores[1])
+
+os.listdir(checkpoint_dir)
+model.load_weights(checkpoint_path)
+filepath = "model.h5"
+new_model = load_model(filepath)
+checkpoint = ModelCheckpoint(filepath, monitor='loss', verbose=1, save_best_only=True, mode='min')
+callbacks_list = [checkpoint]
+new_model.fit(x=[a,X_treino],y=y_treino, epochs=n_epochs, batch_size=n_batch, callbacks=callbacks_list)
+
+
+
+#Intraday predictions
+for i in range(0,60):
+    print(i)
+    if i == 0: 
+      pred = model.predict([feat_test,X_teste])     
+      pred = np.reshape(pred,(pred.shape[0],pred.shape[1],1))
+      X_teste1 = np.delete(X_teste,[0],axis=1)
+      X_teste1 = np.append(X_teste1,pred,axis=1)
+    else:
+      pred = model.predict([feat_test,X_teste1])     
+      pred = np.reshape(pred,(pred.shape[0],pred.shape[1],1))
+      X_teste1 = np.delete(X_teste1,[0],axis=1)
+      X_teste1 = np.append(X_teste1,pred,axis=1)
+pred_D = X_teste1[:,units-1:len_window-1]
+pred_D = np.reshape(pred_D,(pred_D.shape[0],pred_D.shape[1]))      
+
+
+
+#Interday Data prepping
+Y_Dminus = np.array(train_Dminus)
+Y_Dminus = np.reshape(Y_Dminus,(Y_Dminus.shape[0],Y_Dminus.shape[1],1))
+Y_Dminus_val =np.array(val_Dminus)
+Y_Dminus_val = np.reshape(Y_Dminus_val,(Y_Dminus_val.shape[0],Y_Dminus_val.shape[1],1))
+feat_treino = np.array(feat_train)
+feat_valid = np.array(feat_val)
+X_treino = np.array(train_lstm_X)
+X_treino = np.reshape(X_treino,(X_treino.shape[0],X_treino.shape[1],1))
+X_valid = np.array(val_lstm_X)
+X_valid = np.reshape(X_valid,(X_valid.shape[0],X_valid.shape[1],1))
+
+units = 60
+inputs_fnn = keras.layers.Input(shape = (n_features,))
+x = keras.layers.Dense(units, activation="relu")(inputs_fnn)
+x1 = keras.layers.Dense(units, activation = 'sigmoid')(x)
+x2 = keras.layers.Dense(units, activation = 'sigmoid')(x)
+input_x = [x1,x2] 
+
+inputs_lstm = keras.layers.Input(shape=(X_treino.shape[1],1))
+y = keras.layers.LSTM(units, return_sequences = True)(inputs_lstm,initial_state=input_x)
+y = keras.layers.LSTM(units, return_sequences = True)(y)
+y1 = keras.layers.LSTM(units, return_sequences = False)(y)
+y2 = keras.layers.LSTM(units, return_sequences = False)(y)
+input_y = [y1,y2]
+
+inputs_lstm2 = keras.layers.Input(shape=(None,1))
+z = keras.layers.LSTM(units, return_sequences = True)(inputs_lstm2,initial_state=input_y)
+z = keras.layers.LSTM(units, return_sequences = True)(z)
+z = keras.layers.LSTM(units, return_sequences = False)(z)
+
+hid1 = keras.layers.Dense(units)(z)
+out = keras.layers.Dense(1)(hid1)
+model1 = keras.Model(inputs=[inputs_fnn,inputs_lstm,inputs_lstm2], outputs=out)
+model1.compile(optimizer='adam',
+              loss='mse',
+              metrics=['mae'])
+model1.fit(x=[feat_treino,X_treino,Y_Dminus],y=train_Dplus1, epochs=10, batch_size=60)
+
+
+# Interday D+1
+pred_D_1 = model1.predict([feat_test,pred_D,Y_Dminus_teste])
+pred_D_1 = np.reshape(pred_D_1,(pred_D_1.shape[0],pred_D_1.shape[1],1))
+Y_Dminus_new_teste = np.reshape(Y_Dminus_teste,(Y_Dminus_teste.shape[0],Y_Dminus_teste.shape[1],1))
+Y_Dminus_new_teste = np.delete(Y_Dminus_new_teste,[0],axis=1)
+Y_Dminus_new_teste = np.append(Y_Dminus_new_teste,pred_D_1,axis=1)
+
+pred_D_1_val = model.predict([feat_valid,X_valid,Y_Dminus_val])
+pred_D_1_val = np.reshape(pred_D_1_val,(pred_D_1_val.shape[0],pred_D_1_val.shape[1],1))
+Y_Dminus_val_new = Y_Dminus_val
+Y_Dminus_val_new = np.delete(Y_Dminus_val_new,[0],axis=1)
+Y_Dminus_val_new = np.append(Y_Dminus_val_new,pred_D_1_val,axis=1)
+
+
+#Interday D+2 
+pred_D_2 = model1.predict([feat_test,pred_D,Y_Dminus_new_teste])
+pred_D_2_val = model.predict([feat_valid,X_valid,Y_Dminus_val_new])
+print(mean_absolute_error(train_Dplus2,pred_D_2))
+
+pred_D_2 = np.reshape(pred_D_2,(pred_D_2.shape[0],pred_D_2.shape[1],1))
+Y_total_teste = np.reshape(Y_Dminus_teste,(Y_Dminus_teste.shape[0],Y_Dminus_teste.shape[1],1))
+Y_total_teste = np.append(Y_total_teste,pred_D_1,axis=1)
+Y_total_teste = np.append(Y_total_teste,pred_D_2,axis=1)
+
+f_nn1 = np.reshape(pred_D_1,(pred_D_1.shape[0],pred_D_1.shape[1]))
+f_nn2 = np.reshape(pred_D_2,(pred_D_2.shape[0],pred_D_2.shape[1]))
+
+# Results submission file
+ids = []
+preds = []
+for i, row in test.iterrows():
+    for j in range(1, 61):
+        ids.append(f'{i+1}_{j}')
+        preds.append(pred_D1[i][0])
+    ids.append(f'{i+1}_61')
+    preds.append(f_nn1[i][0])  # D+1
+    ids.append(f'{i+1}_62')
+    preds.append(f_nn2[i][0])  # D+2
+
+submission_df = pd.DataFrame(
+        list(zip(ids, preds)), columns=['Id', 'Predicted'])
+
+# Save submission to csv file
+submission_df.to_csv('/content/google-drive/My Drive/kaggle/winton/submission_lstm.csv', index=False)
