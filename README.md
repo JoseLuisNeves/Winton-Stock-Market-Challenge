@@ -2,8 +2,8 @@
 # Summary
 In this project, Winton challenges you to take on the very difficult task of predicting the future (stock returns). Given historical stock performance and a host of masked features, can you predict intra and end of day returns without being deceived by all the noise?
 
-# Data
-https://www.kaggle.com/c/the-winton-stock-market-challenge/data
+# Data (https://www.kaggle.com/c/the-winton-stock-market-challenge/data)
+
 It is given to us five day window of stock returns, days D-2, D-1, D, D+1, and D+2. We have the returns of the first two days and part of the third. We are asked to predict the rest of the stock returns of the five day window. In the third day the type of returns that we have its intraday, on a total 120 minutes of given data with wich we want to predict the next 60 minutes. The rest of the returns consists of the return that each stock makes since the opening of the day untill the opening of the stock market the next day. We are also provided with 25 anonymous features that may or may not be useful. 
 The training comes with 40 000 samples and the testing with 120 000. The next image should give the reader an idea of the organization of the data.
 
